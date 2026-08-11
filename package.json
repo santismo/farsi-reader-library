@@ -1,0 +1,8 @@
+{
+  "name": "farsi-materials",
+  "private": true,
+  "type": "module",
+  "scripts": {
+    "build": "node scripts/build-site.mjs"
+  }
+}
