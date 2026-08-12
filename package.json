@@ -6,6 +6,7 @@
     "build": "node scripts/build-site.mjs",
     "build:pages": "npm run build && node scripts/build-github-pages.mjs",
     "validate:pages": "node scripts/validate-github-pages.mjs",
+    "validate:airman": "node scripts/validate-airman-terminology.mjs",
     "downloads:index": "node scripts/generate-download-index.mjs"
   }
 }
