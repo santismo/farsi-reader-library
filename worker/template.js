@@ -81,21 +81,13 @@ const externalLink = (url) => `href="${escape(url)}" target="_blank" rel="noopen
 const commonScript = String.raw`
 const body = document.body;
 const themeToggle = document.querySelector('[data-theme-toggle]');
-const englishToggle = document.querySelector('[data-english-toggle]');
 const savedTheme = localStorage.getItem('farsi-theme');
 if (savedTheme === 'dark' || (!savedTheme && matchMedia('(prefers-color-scheme: dark)').matches)) body.classList.add('dark');
-if (localStorage.getItem('farsi-hide-english') === 'true') body.classList.add('hide-english');
 function syncGlobalControls() {
   const dark = body.classList.contains('dark');
-  const hidden = body.classList.contains('hide-english');
   if (themeToggle) {
     themeToggle.textContent = dark ? '☀' : '☾';
     themeToggle.setAttribute('aria-pressed', String(dark));
-  }
-  if (englishToggle) {
-    englishToggle.textContent = hidden ? 'EN×' : 'EN';
-    englishToggle.setAttribute('aria-pressed', String(hidden));
-    englishToggle.setAttribute('aria-label', hidden ? 'نمایش عنوان‌های انگلیسی' : 'پنهان کردن عنوان‌های انگلیسی');
   }
 }
 themeToggle?.addEventListener('click', function () {
@@ -103,59 +95,82 @@ themeToggle?.addEventListener('click', function () {
   localStorage.setItem('farsi-theme', body.classList.contains('dark') ? 'dark' : 'light');
   syncGlobalControls();
 });
-englishToggle?.addEventListener('click', function () {
-  body.classList.toggle('hide-english');
-  localStorage.setItem('farsi-hide-english', String(body.classList.contains('hide-english')));
-  syncGlobalControls();
-});
 syncGlobalControls();
 `;
 
-const piperWarmScript = String.raw`
-const PIPER_MODULE_URL = 'https://esm.sh/@mintplex-labs/piper-tts-web@1.0.5?bundle&deps=onnxruntime-web@1.18.0';
-const PIPER_VOICE_ID = 'fa_IR-amir-medium';
-const piperWarmup = window.farsiPiper = window.farsiPiper || { state: 'idle', module: null, promise: null, message: '' };
+// Adapted from the proven worker/session pattern in santismo/wordfreak.
+const piperWorkerScript = String.raw`
+const PIPER_MODULE_URLS = [
+  'https://cdn.jsdelivr.net/npm/@mintplex-labs/piper-tts-web@1.0.4/+esm',
+  'https://esm.sh/@mintplex-labs/piper-tts-web@1.0.4?bundle'
+];
+const PIPER_MAX_TEXT_CHARS = 500;
+let piperModulePromise = null;
+let session = null;
+let activeRequestId = 0;
+let workQueue = Promise.resolve();
 
-function reportPiper(message) {
-  piperWarmup.message = message;
-  const status = document.querySelector('[data-voice-status]');
-  if (status) status.textContent = message;
-  window.dispatchEvent(new CustomEvent('farsi-piper-status', { detail: message }));
-}
-
-function piperProgressMessage(progress) {
-  if (!progress || String(progress.url || '').startsWith('tts://')) return 'در حال آماده‌سازی موتور گفتار…';
-  if (progress.total > 0) return 'در حال دریافت صدای فارسی: ' + Math.round(progress.loaded * 100 / progress.total) + '٪';
-  return 'در حال دریافت صدای فارسی…';
-}
-
-piperWarmup.warm = function () {
-  if (piperWarmup.state === 'ready') return Promise.resolve(piperWarmup.module);
-  if (piperWarmup.promise) return piperWarmup.promise;
-  piperWarmup.state = 'loading';
-  reportPiper('در حال بارگیری موتور Piper…');
-  piperWarmup.promise = import(PIPER_MODULE_URL).then(async function (piper) {
-    piperWarmup.module = piper;
-    const stored = await piper.stored().catch(function () { return []; });
-    if (!stored.includes(PIPER_VOICE_ID)) {
-      piperWarmup.state = 'downloading';
-      reportPiper('در حال دریافت صدای فارسی…');
-      await piper.download(PIPER_VOICE_ID, function (progress) {
-        reportPiper(piperProgressMessage(progress));
-      });
+async function loadPiperModule() {
+  if (piperModulePromise) return piperModulePromise;
+  piperModulePromise = (async function () {
+    let lastError = null;
+    for (const url of PIPER_MODULE_URLS) {
+      try { return await import(url); }
+      catch (error) { lastError = error; }
     }
-    piperWarmup.state = 'ready';
-    reportPiper('صدای Piper آماده است.');
-    return piper;
-  }).catch(function (error) {
-    piperWarmup.state = 'error';
-    piperWarmup.promise = null;
-    reportPiper('Piper در دسترس نیست؛ صدای مرورگر استفاده می‌شود.');
-    throw error;
-  });
-  return piperWarmup.promise;
-};
+    throw lastError || new Error('Piper module could not load');
+  })();
+  try { return await piperModulePromise; }
+  catch (error) { piperModulePromise = null; throw error; }
+}
 
+function reportProgress(event) {
+  if (!activeRequestId) return;
+  self.postMessage({
+    type: 'progress',
+    id: activeRequestId,
+    url: String(event?.url || ''),
+    loaded: Number(event?.loaded) || 0,
+    total: Number(event?.total) || 0
+  });
+}
+
+async function ensureSession(voiceId) {
+  const module = await loadPiperModule();
+  if (!module.PATH_MAP || !module.PATH_MAP[voiceId]) throw new Error('Persian Piper voice is unavailable');
+  if (!session) {
+    session = new module.TtsSession({ voiceId: voiceId, progress: reportProgress });
+    await session.waitReady;
+  }
+  return session;
+}
+
+async function synthesize(message) {
+  const id = Number(message?.id) || 0;
+  const voiceId = String(message?.voiceId || '');
+  const text = String(message?.text || '').trim();
+  if (!id || !voiceId || !text || text.length > PIPER_MAX_TEXT_CHARS) throw new Error('Invalid Piper request');
+  activeRequestId = id;
+  try {
+    const activeSession = await ensureSession(voiceId);
+    const blob = await activeSession.predict(text);
+    if (!(blob instanceof Blob) || !blob.size) throw new Error('Piper returned no audio');
+    self.postMessage({ type: 'result', id: id, blob: blob });
+  } finally {
+    activeRequestId = 0;
+  }
+}
+
+self.addEventListener('message', function (event) {
+  if (event.data?.type !== 'synthesize') return;
+  const message = event.data;
+  workQueue = workQueue.then(async function () {
+    try { await synthesize(message); }
+    catch (error) {
+      self.postMessage({ type: 'error', id: Number(message?.id) || 0, message: String(error?.message || 'Piper synthesis failed') });
+    }
+  });
+});
 `;
 
 const readerScript = String.raw`
@@ -173,6 +188,13 @@ let nativeUtterance = null;
 let voiceMode = 'browser';
 let animationFrame = 0;
 let requestToken = 0;
+let piperWorker = null;
+let piperRequestId = 0;
+const piperRequests = new Map();
+const piperCache = new Map();
+const PIPER_VOICE_ID = 'fa_IR-gyro-medium';
+const PIPER_FIRST_TIMEOUT = 180000;
+const PIPER_PREDICT_TIMEOUT = 45000;
 
 function setStatus(message) {
   if (statusNode) statusNode.textContent = message;
@@ -276,23 +298,77 @@ async function ensureAudio() {
   if (audioContext.state !== 'running') await audioContext.resume();
 }
 
-async function ensurePiper(waitMilliseconds) {
-  const warmup = window.farsiPiper;
-  if (!warmup?.warm) throw new Error('Piper warmup unavailable');
-  if (warmup.state === 'ready') return warmup.module;
-  let timer = 0;
-  const timeout = new Promise(function (_, reject) {
-    timer = setTimeout(function () {
-      const error = new Error('Piper is still warming');
-      error.code = 'PIPER_WARMING';
-      reject(error);
-    }, waitMilliseconds);
-  });
-  try {
-    return await Promise.race([warmup.warm(), timeout]);
-  } finally {
-    clearTimeout(timer);
+function failPiper(error) {
+  voiceMode = 'browser';
+  if (voiceBadge) voiceBadge.textContent = 'صدای مرورگر';
+  if (piperButton) {
+    piperButton.textContent = 'تلاش دوباره برای Piper';
+    piperButton.disabled = false;
   }
+  if (piperWorker) piperWorker.terminate();
+  piperWorker = null;
+  piperRequests.forEach(function (request) {
+    clearTimeout(request.timer);
+    request.reject(error);
+  });
+  piperRequests.clear();
+}
+
+function ensurePiperWorker() {
+  if (piperWorker) return piperWorker;
+  if (!window.Worker || !window.WebAssembly || !navigator.storage?.getDirectory) {
+    throw new Error('Piper is not supported in this browser');
+  }
+  piperWorker = new Worker('/piper-worker.js?v=2', { type: 'module', name: 'farsi-reader-piper' });
+  piperWorker.addEventListener('message', function (event) {
+    const message = event.data || {};
+    const request = piperRequests.get(Number(message.id));
+    if (!request) return;
+    if (message.type === 'progress') {
+      const loaded = Math.max(0, Number(message.loaded) || 0);
+      const total = Math.max(0, Number(message.total) || 0);
+      if (total > 0) setStatus('در حال دریافت صدای Piper: ' + Math.min(100, Math.round(loaded * 100 / total)) + '٪');
+      else if (loaded > 0) setStatus('در حال دریافت صدای Piper: ' + (loaded / 1048576).toFixed(1) + ' مگابایت');
+      else setStatus('در حال آماده‌سازی Piper؛ صدای مرورگر همچنان فعال است.');
+      return;
+    }
+    clearTimeout(request.timer);
+    piperRequests.delete(Number(message.id));
+    if (message.type === 'result' && message.blob instanceof Blob && message.blob.size) request.resolve(message.blob);
+    else request.reject(new Error(message.message || 'Piper synthesis failed'));
+  });
+  piperWorker.addEventListener('error', function (event) {
+    event.preventDefault();
+    failPiper(new Error(event.message || 'Piper worker failed'));
+  });
+  piperWorker.addEventListener('messageerror', function () {
+    failPiper(new Error('Piper returned unreadable data'));
+  });
+  return piperWorker;
+}
+
+function requestPiper(text, firstRequest) {
+  const clean = String(text || '').trim().slice(0, 500);
+  if (piperCache.has(clean)) return Promise.resolve(piperCache.get(clean));
+  const worker = ensurePiperWorker();
+  const id = piperRequestId + 1;
+  piperRequestId = id;
+  return new Promise(function (resolve, reject) {
+    const timer = setTimeout(function () {
+      if (!piperRequests.has(id)) return;
+      failPiper(new Error('Piper timed out'));
+    }, firstRequest ? PIPER_FIRST_TIMEOUT : PIPER_PREDICT_TIMEOUT);
+    piperRequests.set(id, {
+      timer: timer,
+      resolve: function (blob) {
+        piperCache.set(clean, blob);
+        if (piperCache.size > 8) piperCache.delete(piperCache.keys().next().value);
+        resolve(blob);
+      },
+      reject: reject
+    });
+    worker.postMessage({ type: 'synthesize', id: id, voiceId: PIPER_VOICE_ID, text: clean });
+  });
 }
 
 function speakWithBrowser(row, token, message) {
@@ -337,11 +413,7 @@ async function readRow(row) {
   await ensureAudio().catch(function () {});
   setStatus('در حال ساخت صدا با Piper…');
   try {
-    const piper = await ensurePiper(1500);
-    setStatus('در حال ساخت صدا…');
-    const wav = await piper.predict({ text: row.dataset.text || '', voiceId: 'fa_IR-amir-medium' }, function (progress) {
-      if (token === requestToken && String(progress?.url || '').startsWith('tts://')) setStatus('در حال ساخت صدا…');
-    });
+    const wav = await requestPiper(row.dataset.text || '', false);
     if (token !== requestToken) return;
     await ensureAudio();
     const buffer = await audioContext.decodeAudioData(await wav.arrayBuffer());
@@ -351,55 +423,31 @@ async function readRow(row) {
     startBuffer(0);
   } catch (error) {
     if (token !== requestToken) return;
-    const message = error?.code === 'PIPER_WARMING'
-      ? 'Piper هنوز در حال آماده‌سازی است؛ فعلاً صدای مرورگر پخش می‌شود.'
-      : 'Piper در دسترس نیست؛ صدای مرورگر پخش می‌شود.';
-    speakWithBrowser(row, token, message);
+    failPiper(error);
+    speakWithBrowser(row, token, 'Piper در دسترس نیست؛ صدای مرورگر پخش می‌شود.');
   }
 }
 
-function activatePiper() {
-  const warmup = window.farsiPiper;
-  if (!warmup?.warm) {
-    setStatus('Piper در این مرورگر در دسترس نیست؛ صدای مرورگر فعال است.');
-    return;
+async function activatePiper() {
+  if (piperButton) {
+    piperButton.textContent = 'در حال آماده‌سازی Piper…';
+    piperButton.disabled = true;
   }
-  if (warmup.state === 'ready') {
+  setStatus('بار نخست نزدیک به ۹۰ مگابایت دریافت می‌شود؛ صدای مرورگر همچنان فعال است.');
+  try {
+    await ensureAudio().catch(function () {});
+    await requestPiper((currentRow || rows[0])?.dataset.text || 'سلام', true);
     voiceMode = 'piper';
-    if (voiceBadge) voiceBadge.textContent = 'Piper · امیر';
+    if (voiceBadge) voiceBadge.textContent = 'Piper · فارسی';
     if (piperButton) {
       piperButton.textContent = 'Piper فعال است';
       piperButton.disabled = true;
     }
-    setStatus('صدای Piper آماده است.');
-    return;
-  }
-  if (piperButton) {
-    piperButton.textContent = 'در حال دریافت Piper…';
-    piperButton.disabled = true;
-  }
-  setStatus('در حال دریافت صدای Piper؛ در این فاصله صدای مرورگر فعال است.');
-  const slowNotice = setTimeout(function () {
-    if (warmup.state === 'ready' || warmup.state === 'error') return;
-    setStatus('دریافت Piper هنوز ادامه دارد؛ پخش جمله‌ها با صدای مرورگر آماده است.');
-    if (piperButton) {
-      piperButton.textContent = 'بررسی دوبارهٔ Piper';
-      piperButton.disabled = false;
-    }
-  }, 12000);
-  warmup.warm().then(function () {
-    clearTimeout(slowNotice);
-    activatePiper();
-  }).catch(function () {
-    clearTimeout(slowNotice);
-    voiceMode = 'browser';
-    if (voiceBadge) voiceBadge.textContent = 'صدای مرورگر';
-    if (piperButton) {
-      piperButton.textContent = 'تلاش دوباره برای Piper';
-      piperButton.disabled = false;
-    }
+    setStatus('صدای Piper آماده است؛ جمله‌ای را برای پخش انتخاب کنید.');
+  } catch (error) {
+    failPiper(error);
     setStatus('دریافت Piper کامل نشد؛ صدای مرورگر فعال است.');
-  });
+  }
 }
 
 function pauseOrResume() {
@@ -465,14 +513,17 @@ nextButton?.addEventListener('click', function () {
   const nextRow = rows[Math.min(rows.length - 1, currentIndex + 1)];
   readRow(nextRow);
 });
-window.addEventListener('beforeunload', function () { stopPlayback(false); });
+window.addEventListener('beforeunload', function () {
+  stopPlayback(false);
+  if (piperWorker) piperWorker.terminate();
+});
 `;
 
-const globalControls = `<div class="global-controls" aria-label="تنظیمات نمایش"><button type="button" data-english-toggle aria-label="پنهان کردن عنوان‌های انگلیسی">EN</button><button type="button" data-theme-toggle aria-label="تغییر حالت روشن و تیره">☾</button></div>`;
+const globalControls = `<div class="global-controls" aria-label="تنظیمات نمایش"><button type="button" data-theme-toggle aria-label="تغییر حالت روشن و تیره">☾</button></div>`;
 const page = (title, content, scripts = "", origin = "") => {
   const imageUrl = origin ? `${origin}/og.png` : "";
   const social = imageUrl ? `<meta property="og:type" content="website"><meta property="og:title" content="${escape(title)}"><meta property="og:description" content="کتابخانه خواندن و شنیدن فارسی"><meta property="og:image" content="${escape(imageUrl)}"><meta name="twitter:card" content="summary_large_image"><meta name="twitter:title" content="${escape(title)}"><meta name="twitter:description" content="کتابخانه خواندن و شنیدن فارسی"><meta name="twitter:image" content="${escape(imageUrl)}">` : "";
-  return `<!doctype html><html lang="fa" dir="rtl"><head><meta charset="utf-8"><meta name="viewport" content="width=device-width,initial-scale=1"><meta name="theme-color" content="#123f38"><meta name="description" content="کتابخانه خواندن و شنیدن فارسی با ترجمه جمله‌ای و تمرین شنیداری">${social}<title>${escape(title)}</title><style>${css}${handbookCss}</style></head><body>${globalControls}${content}<script>${commonScript}</script><script type="module">${piperWarmScript}</script>${scripts}</body></html>`;
+  return `<!doctype html><html lang="fa" dir="rtl"><head><meta charset="utf-8"><meta name="viewport" content="width=device-width,initial-scale=1"><meta name="theme-color" content="#123f38"><meta name="description" content="کتابخانه خواندن و شنیدن فارسی با ترجمه جمله‌ای و تمرین شنیداری">${social}<title>${escape(title)}</title><style>${css}${handbookCss}</style></head><body>${globalControls}${content}<script>${commonScript}</script>${scripts}</body></html>`;
 };
 
 function siteHeader(active = "library") {
@@ -488,7 +539,7 @@ function home(origin) {
   const categories = categoryOrder.filter((category) => READERS.some((reader) => reader.category === category));
   const groups = categories.map((category) => ({ category, readers: READERS.filter((reader) => reader.category === category) }));
   const weeklyCount = READERS.reduce((total, reader) => total + reader.weeks.length, 0);
-  const cards = groups.map(({ category, readers }) => `<section class="collection" id="${encodeURIComponent(category)}"><div class="collection-heading"><p>${category}</p><span>${faNumber(readers.length)} عنوان</span></div><div class="reader-grid">${readers.map((reader) => `<article class="reader-card"><div class="reader-card-top"><p>${reader.category}</p><span>${faNumber(reader.weeks.length)} بخش</span></div><h2>${reader.title_fa}</h2><p class="english-title">${escape(reader.title_en)}</p><div class="card-actions"><a class="read-button" href="/read/${reader.slug}/1">شروع خواندن</a>${reader.student && reader.teacher ? `<div class="downloads"><a href="/downloads/${reader.student}">دانشجو</a><a href="/downloads/${reader.teacher}">مدرس</a></div>` : `<span class="downloads">نسخه برخط</span>`}</div></article>`).join("")}</div></section>`).join("");
+  const cards = groups.map(({ category, readers }) => `<section class="collection" id="${encodeURIComponent(category)}"><div class="collection-heading"><p>${category}</p><span>${faNumber(readers.length)} عنوان</span></div><div class="reader-grid">${readers.map((reader) => `<article class="reader-card"><div class="reader-card-top"><p>${reader.category}</p><span>${faNumber(reader.weeks.length)} بخش</span></div><h2>${reader.title_fa}</h2><div class="card-actions"><a class="read-button" href="/read/${reader.slug}/1">شروع خواندن</a>${reader.student && reader.teacher ? `<div class="downloads"><a href="/downloads/${reader.student}">دانشجو</a><a href="/downloads/${reader.teacher}">مدرس</a></div>` : `<span class="downloads">نسخه برخط</span>`}</div></article>`).join("")}</div></section>`).join("");
   return page("خوانش فارسی", `<main>${siteHeader()}<section class="hero"><p class="eyebrow">کتابخانه خواندن و شنیدن</p><h1>فارسی را بخوان، بشنو، و کشف کن.</h1><p class="hero-copy">متن‌های ادبی و علمی، جمله‌به‌جمله؛ با ترجمه انتخابی، صدای فارسی و حالت تمرین شنیداری.</p><div class="stats"><span>${faNumber(READERS.length)} عنوان</span><span>${faNumber(weeklyCount)} بخش</span><span>دانشجو و مدرس</span></div></section><section class="quick-strip" aria-label="امکانات خوانش"><div class="quick-item"><span class="quick-icon">۱</span><p>ترجمه هر جمله، فقط وقتی لازم است</p></div><div class="quick-item"><span class="quick-icon">◖</span><p>صدای فارسی با مکث و ادامه</p></div><div class="quick-item"><span class="quick-icon">◌</span><p>حالت شنیداری با متن پوشیده</p></div></section><section class="feature-panel"><div class="feature-card"><div class="feature-copy"><small>تازه در کتابخانه</small><h2>راهنمای مطالعهٔ AFH 1</h2><p>نسخه فارسی دانشجو و نسخه دوزبانه مدرس، با شماره‌گذاری یکسان جمله‌ها.</p></div><div class="feature-actions"><a class="button" href="/read/afh1-2025/1">مطالعه در سایت</a><a class="button secondary" href="/downloads/${HANDBOOKS.student}">دریافت نسخه دانشجو</a><a class="button secondary" href="/downloads/${HANDBOOKS.teacher}">دریافت نسخه مدرس</a></div></div></section><div class="collections">${cards}</div>${siteFooter()}</main>`, "", origin);
 }
 
@@ -501,7 +552,7 @@ function readerPage(reader, week, teacher, origin) {
   const notes = teacher && week.vocab.length ? `<section class="teacher-notes" dir="ltr"><h2>Vocabulary and usage</h2><ul>${week.vocab.map((word) => `<li>${escape(word)}</li>`).join("")}</ul>${week.note ? `<p><strong>Teaching note:</strong> ${escape(week.note)}</p>` : ""}</section>` : "";
   const picker = `<label>بخش <select aria-label="انتخاب بخش" onchange="window.location.href='/read/${reader.slug}/'+this.value+'${teacher ? "?edition=teacher" : ""}'">${reader.weeks.map((item) => `<option value="${item.number}"${item.number === week.number ? " selected" : ""}>${faNumber(item.number)} از ${faNumber(reader.weeks.length)}</option>`).join("")}</select></label>`;
   const downloads = reader.student && reader.teacher ? `<section class="reader-downloads"><p>دریافت نسخه کامل</p><a href="/downloads/${reader.student}">فایل دانشجو</a><a href="/downloads/${reader.teacher}">فایل مدرس</a></section>` : "";
-  const tools = `<section class="reader-tools" aria-label="ابزارهای خواندن"><button class="tool-button" type="button" data-listening-toggle aria-pressed="false">حالت شنیداری</button><button class="tool-button" type="button" data-play-toggle aria-pressed="false">پخش</button><button class="tool-button" type="button" data-next-sentence>جمله بعد</button><button class="tool-button" type="button" data-piper-button>صدای Piper (۶۴ مگابایت)</button><span class="voice-badge" data-voice-badge>صدای مرورگر</span><span class="voice-status" data-voice-status aria-live="polite">صدای سریع مرورگر آماده است؛ Piper اختیاری است.</span></section>`;
+  const tools = `<section class="reader-tools" aria-label="ابزارهای خواندن"><button class="tool-button" type="button" data-listening-toggle aria-pressed="false">حالت شنیداری</button><button class="tool-button" type="button" data-play-toggle aria-pressed="false">پخش</button><button class="tool-button" type="button" data-next-sentence>جمله بعد</button><button class="tool-button" type="button" data-piper-button>فعال‌سازی Piper (حدود ۹۰ مگابایت)</button><span class="voice-badge" data-voice-badge>صدای مرورگر</span><span class="voice-status" data-voice-status aria-live="polite">صدای سریع مرورگر آماده است؛ Piper اختیاری است.</span></section>`;
   return page(`${reader.title_fa} — بخش ${faNumber(week.number)}`, `<main class="reader-page"><header class="reader-header"><a class="back-link" href="/">← کتابخانه</a><div class="reader-title-block"><p>${reader.category}</p><h1>${reader.title_fa}</h1>${teacher ? `<span class="english-title" dir="ltr">${escape(reader.title_en)}</span>` : ""}</div><span class="week-chip">بخش ${faNumber(week.number)}</span></header><nav class="edition-switch" aria-label="انتخاب نسخه"><a class="${teacher ? "" : "active"}" href="/read/${reader.slug}/${week.number}">مطالعه</a><a class="${teacher ? "active" : ""}" href="/read/${reader.slug}/${week.number}?edition=teacher">راهنمای مدرس</a></nav>${tools}<article class="week-reader"><div class="week-intro"><p>${week.section_fa}</p><span>${faNumber(week.lines.length)} جمله</span></div><ol class="source-lines">${lines}</ol>${notes}</article><nav class="week-navigation">${previous}${picker}${next}</nav>${downloads}</main>`, `<script type="module">${readerScript}</script>`, origin);
 }
 
@@ -530,6 +581,7 @@ export default {
   async fetch(request) {
     const url = new URL(request.url);
     const path = url.pathname.split("/").filter(Boolean).map(decodeURIComponent);
+    if (path[0] === "piper-worker.js" && path.length === 1) return new Response(piperWorkerScript, { headers: { "content-type": "application/javascript; charset=utf-8", "cache-control": "public, max-age=86400" } });
     if (path[0] === "og.png" && path.length === 1) return socialImage();
     if (path[0] === "downloads" && path.length === 2) return download(path[1]);
     if (path[0] === "resources" && path.length === 1) return new Response(resourcesPage(url.origin), { headers: { "content-type": "text/html; charset=utf-8" } });
