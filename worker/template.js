@@ -107,7 +107,7 @@ const PIPER_MODULE_URLS = [
 const PIPER_MAX_TEXT_CHARS = 500;
 let piperModulePromise = null;
 let session = null;
-let activeRequestId = 0;
+let activeRequest = null;
 let workQueue = Promise.resolve();
 
 async function loadPiperModule() {
@@ -125,10 +125,10 @@ async function loadPiperModule() {
 }
 
 function reportProgress(event) {
-  if (!activeRequestId) return;
-  self.postMessage({
+  if (!activeRequest) return;
+  activeRequest.client.postMessage({
     type: 'progress',
-    id: activeRequestId,
+    id: activeRequest.id,
     url: String(event?.url || ''),
     loaded: Number(event?.loaded) || 0,
     total: Number(event?.total) || 0
@@ -145,32 +145,139 @@ async function ensureSession(voiceId) {
   return session;
 }
 
-async function synthesize(message) {
+async function synthesize(message, client) {
   const id = Number(message?.id) || 0;
   const voiceId = String(message?.voiceId || '');
   const text = String(message?.text || '').trim();
   if (!id || !voiceId || !text || text.length > PIPER_MAX_TEXT_CHARS) throw new Error('Invalid Piper request');
-  activeRequestId = id;
+  activeRequest = { id: id, client: client };
   try {
     const activeSession = await ensureSession(voiceId);
     const blob = await activeSession.predict(text);
     if (!(blob instanceof Blob) || !blob.size) throw new Error('Piper returned no audio');
-    self.postMessage({ type: 'result', id: id, blob: blob });
+    client.postMessage({ type: 'result', id: id, blob: blob });
   } finally {
-    activeRequestId = 0;
+    activeRequest = null;
   }
 }
 
-self.addEventListener('message', function (event) {
-  if (event.data?.type !== 'synthesize') return;
-  const message = event.data;
+function enqueue(message, client) {
+  if (message?.type !== 'synthesize') return;
   workQueue = workQueue.then(async function () {
-    try { await synthesize(message); }
+    try { await synthesize(message, client); }
     catch (error) {
-      self.postMessage({ type: 'error', id: Number(message?.id) || 0, message: String(error?.message || 'Piper synthesis failed') });
+      client.postMessage({ type: 'error', id: Number(message?.id) || 0, message: String(error?.message || 'Piper synthesis failed') });
     }
   });
+}
+
+self.addEventListener('connect', function (event) {
+  const port = event.ports[0];
+  port.addEventListener('message', function (messageEvent) { enqueue(messageEvent.data, port); });
+  port.start();
 });
+
+self.addEventListener('message', function (event) {
+  enqueue(event.data, self);
+});
+`;
+
+const piperClientScript = String.raw`
+const piperApi = window.farsiPiper = {
+  state: 'loading',
+  message: 'Piper در حال آماده‌سازی است؛ صدای مرورگر فعلاً فعال است.',
+  requestId: 0,
+  requests: new Map(),
+  cache: new Map(),
+  transport: null,
+  shared: false,
+  ready: null
+};
+const PIPER_VOICE_ID = 'fa_IR-gyro-medium';
+
+function announcePiper(state, message) {
+  piperApi.state = state;
+  piperApi.message = message;
+  const status = document.querySelector('[data-voice-status]');
+  if (status) status.textContent = message;
+  window.dispatchEvent(new CustomEvent('farsi-piper-state', { detail: { state: state, message: message } }));
+}
+
+function connectPiper() {
+  if (piperApi.transport) return piperApi.transport;
+  if (!window.WebAssembly || !navigator.storage?.getDirectory) throw new Error('Piper storage is unavailable');
+  if (window.SharedWorker) {
+    try {
+      const sharedWorker = new SharedWorker('/piper-worker.js?v=3', { type: 'module', name: 'farsi-reader-piper' });
+      piperApi.transport = sharedWorker.port;
+      piperApi.shared = true;
+      sharedWorker.port.start();
+    } catch {}
+  }
+  if (!piperApi.transport && window.Worker) {
+    piperApi.transport = new Worker('/piper-worker.js?v=3', { type: 'module', name: 'farsi-reader-piper' });
+  }
+  if (!piperApi.transport) {
+    throw new Error('Web workers are unavailable');
+  }
+  piperApi.transport.addEventListener('message', function (event) {
+    const message = event.data || {};
+    const request = piperApi.requests.get(Number(message.id));
+    if (!request) return;
+    if (message.type === 'progress') {
+      const loaded = Math.max(0, Number(message.loaded) || 0);
+      const total = Math.max(0, Number(message.total) || 0);
+      if (total > 0) announcePiper('loading', 'در حال دریافت صدای Piper: ' + Math.min(100, Math.round(loaded * 100 / total)) + '٪');
+      else if (loaded > 0) announcePiper('loading', 'در حال دریافت صدای Piper: ' + (loaded / 1048576).toFixed(1) + ' مگابایت');
+      return;
+    }
+    clearTimeout(request.timer);
+    piperApi.requests.delete(Number(message.id));
+    if (message.type === 'result' && message.blob instanceof Blob && message.blob.size) request.resolve(message.blob);
+    else request.reject(new Error(message.message || 'Piper synthesis failed'));
+  });
+  piperApi.transport.addEventListener('error', function () {
+    announcePiper('error', 'Piper آماده نشد؛ صدای مرورگر فعال است.');
+  });
+  return piperApi.transport;
+}
+
+piperApi.request = function (text, firstRequest) {
+  const clean = String(text || '').trim().slice(0, 500);
+  if (piperApi.cache.has(clean)) return Promise.resolve(piperApi.cache.get(clean));
+  let transport;
+  try { transport = connectPiper(); }
+  catch (error) { return Promise.reject(error); }
+  const id = piperApi.requestId + 1;
+  piperApi.requestId = id;
+  return new Promise(function (resolve, reject) {
+    const timer = setTimeout(function () {
+      if (!piperApi.requests.has(id)) return;
+      piperApi.requests.delete(id);
+      reject(new Error('Piper timed out'));
+    }, firstRequest ? 180000 : 45000);
+    piperApi.requests.set(id, {
+      timer: timer,
+      resolve: function (blob) {
+        piperApi.cache.set(clean, blob);
+        if (piperApi.cache.size > 8) piperApi.cache.delete(piperApi.cache.keys().next().value);
+        resolve(blob);
+      },
+      reject: reject
+    });
+    transport.postMessage({ type: 'synthesize', id: id, voiceId: PIPER_VOICE_ID, text: clean });
+  });
+};
+
+announcePiper('loading', 'Piper به‌طور خودکار در حال آماده‌سازی است؛ بار نخست نزدیک به ۹۰ مگابایت دریافت می‌شود.');
+piperApi.ready = piperApi.request('سلام', true).then(function (blob) {
+  announcePiper('ready', 'صدای Piper آماده است.');
+  return blob;
+}).catch(function (error) {
+  announcePiper('error', 'Piper آماده نشد؛ صدای مرورگر فعال است.');
+  throw error;
+});
+piperApi.ready.catch(function () {});
 `;
 
 const readerScript = String.raw`
@@ -178,7 +285,6 @@ const rows = Array.from(document.querySelectorAll('.sentence-row:not(.is-heading
 const playToggle = document.querySelector('[data-play-toggle]');
 const nextButton = document.querySelector('[data-next-sentence]');
 const listeningToggle = document.querySelector('[data-listening-toggle]');
-const piperButton = document.querySelector('[data-piper-button]');
 const voiceBadge = document.querySelector('[data-voice-badge]');
 const statusNode = document.querySelector('[data-voice-status]');
 let currentRow = null;
@@ -188,13 +294,6 @@ let nativeUtterance = null;
 let voiceMode = 'browser';
 let animationFrame = 0;
 let requestToken = 0;
-let piperWorker = null;
-let piperRequestId = 0;
-const piperRequests = new Map();
-const piperCache = new Map();
-const PIPER_VOICE_ID = 'fa_IR-gyro-medium';
-const PIPER_FIRST_TIMEOUT = 180000;
-const PIPER_PREDICT_TIMEOUT = 45000;
 
 function setStatus(message) {
   if (statusNode) statusNode.textContent = message;
@@ -298,79 +397,6 @@ async function ensureAudio() {
   if (audioContext.state !== 'running') await audioContext.resume();
 }
 
-function failPiper(error) {
-  voiceMode = 'browser';
-  if (voiceBadge) voiceBadge.textContent = 'صدای مرورگر';
-  if (piperButton) {
-    piperButton.textContent = 'تلاش دوباره برای Piper';
-    piperButton.disabled = false;
-  }
-  if (piperWorker) piperWorker.terminate();
-  piperWorker = null;
-  piperRequests.forEach(function (request) {
-    clearTimeout(request.timer);
-    request.reject(error);
-  });
-  piperRequests.clear();
-}
-
-function ensurePiperWorker() {
-  if (piperWorker) return piperWorker;
-  if (!window.Worker || !window.WebAssembly || !navigator.storage?.getDirectory) {
-    throw new Error('Piper is not supported in this browser');
-  }
-  piperWorker = new Worker('/piper-worker.js?v=2', { type: 'module', name: 'farsi-reader-piper' });
-  piperWorker.addEventListener('message', function (event) {
-    const message = event.data || {};
-    const request = piperRequests.get(Number(message.id));
-    if (!request) return;
-    if (message.type === 'progress') {
-      const loaded = Math.max(0, Number(message.loaded) || 0);
-      const total = Math.max(0, Number(message.total) || 0);
-      if (total > 0) setStatus('در حال دریافت صدای Piper: ' + Math.min(100, Math.round(loaded * 100 / total)) + '٪');
-      else if (loaded > 0) setStatus('در حال دریافت صدای Piper: ' + (loaded / 1048576).toFixed(1) + ' مگابایت');
-      else setStatus('در حال آماده‌سازی Piper؛ صدای مرورگر همچنان فعال است.');
-      return;
-    }
-    clearTimeout(request.timer);
-    piperRequests.delete(Number(message.id));
-    if (message.type === 'result' && message.blob instanceof Blob && message.blob.size) request.resolve(message.blob);
-    else request.reject(new Error(message.message || 'Piper synthesis failed'));
-  });
-  piperWorker.addEventListener('error', function (event) {
-    event.preventDefault();
-    failPiper(new Error(event.message || 'Piper worker failed'));
-  });
-  piperWorker.addEventListener('messageerror', function () {
-    failPiper(new Error('Piper returned unreadable data'));
-  });
-  return piperWorker;
-}
-
-function requestPiper(text, firstRequest) {
-  const clean = String(text || '').trim().slice(0, 500);
-  if (piperCache.has(clean)) return Promise.resolve(piperCache.get(clean));
-  const worker = ensurePiperWorker();
-  const id = piperRequestId + 1;
-  piperRequestId = id;
-  return new Promise(function (resolve, reject) {
-    const timer = setTimeout(function () {
-      if (!piperRequests.has(id)) return;
-      failPiper(new Error('Piper timed out'));
-    }, firstRequest ? PIPER_FIRST_TIMEOUT : PIPER_PREDICT_TIMEOUT);
-    piperRequests.set(id, {
-      timer: timer,
-      resolve: function (blob) {
-        piperCache.set(clean, blob);
-        if (piperCache.size > 8) piperCache.delete(piperCache.keys().next().value);
-        resolve(blob);
-      },
-      reject: reject
-    });
-    worker.postMessage({ type: 'synthesize', id: id, voiceId: PIPER_VOICE_ID, text: clean });
-  });
-}
-
 function speakWithBrowser(row, token, message) {
   if (!('speechSynthesis' in window)) {
     setStatus('پخش صوتی در این مرورگر در دسترس نیست.');
@@ -413,7 +439,7 @@ async function readRow(row) {
   await ensureAudio().catch(function () {});
   setStatus('در حال ساخت صدا با Piper…');
   try {
-    const wav = await requestPiper(row.dataset.text || '', false);
+    const wav = await window.farsiPiper.request(row.dataset.text || '', false);
     if (token !== requestToken) return;
     await ensureAudio();
     const buffer = await audioContext.decodeAudioData(await wav.arrayBuffer());
@@ -423,31 +449,18 @@ async function readRow(row) {
     startBuffer(0);
   } catch (error) {
     if (token !== requestToken) return;
-    failPiper(error);
+    voiceMode = 'browser';
+    if (voiceBadge) voiceBadge.textContent = 'صدای مرورگر';
     speakWithBrowser(row, token, 'Piper در دسترس نیست؛ صدای مرورگر پخش می‌شود.');
   }
 }
 
-async function activatePiper() {
-  if (piperButton) {
-    piperButton.textContent = 'در حال آماده‌سازی Piper…';
-    piperButton.disabled = true;
-  }
-  setStatus('بار نخست نزدیک به ۹۰ مگابایت دریافت می‌شود؛ صدای مرورگر همچنان فعال است.');
-  try {
-    await ensureAudio().catch(function () {});
-    await requestPiper((currentRow || rows[0])?.dataset.text || 'سلام', true);
-    voiceMode = 'piper';
-    if (voiceBadge) voiceBadge.textContent = 'Piper · فارسی';
-    if (piperButton) {
-      piperButton.textContent = 'Piper فعال است';
-      piperButton.disabled = true;
-    }
-    setStatus('صدای Piper آماده است؛ جمله‌ای را برای پخش انتخاب کنید.');
-  } catch (error) {
-    failPiper(error);
-    setStatus('دریافت Piper کامل نشد؛ صدای مرورگر فعال است.');
-  }
+function syncPiperState(event) {
+  const state = event?.detail?.state || window.farsiPiper?.state || 'error';
+  const message = event?.detail?.message || window.farsiPiper?.message || '';
+  voiceMode = state === 'ready' ? 'piper' : 'browser';
+  if (voiceBadge) voiceBadge.textContent = state === 'ready' ? 'Piper · فارسی' : state === 'loading' ? 'Piper در حال آماده‌سازی' : 'صدای مرورگر';
+  if (message) setStatus(message);
 }
 
 function pauseOrResume() {
@@ -507,23 +520,21 @@ listeningToggle?.addEventListener('click', function () {
 });
 
 playToggle?.addEventListener('click', pauseOrResume);
-piperButton?.addEventListener('click', activatePiper);
 nextButton?.addEventListener('click', function () {
   const currentIndex = Math.max(0, rows.indexOf(currentRow));
   const nextRow = rows[Math.min(rows.length - 1, currentIndex + 1)];
   readRow(nextRow);
 });
-window.addEventListener('beforeunload', function () {
-  stopPlayback(false);
-  if (piperWorker) piperWorker.terminate();
-});
+window.addEventListener('farsi-piper-state', syncPiperState);
+syncPiperState();
+window.addEventListener('beforeunload', function () { stopPlayback(false); });
 `;
 
 const globalControls = `<div class="global-controls" aria-label="تنظیمات نمایش"><button type="button" data-theme-toggle aria-label="تغییر حالت روشن و تیره">☾</button></div>`;
 const page = (title, content, scripts = "", origin = "") => {
   const imageUrl = origin ? `${origin}/og.png` : "";
   const social = imageUrl ? `<meta property="og:type" content="website"><meta property="og:title" content="${escape(title)}"><meta property="og:description" content="کتابخانه خواندن و شنیدن فارسی"><meta property="og:image" content="${escape(imageUrl)}"><meta name="twitter:card" content="summary_large_image"><meta name="twitter:title" content="${escape(title)}"><meta name="twitter:description" content="کتابخانه خواندن و شنیدن فارسی"><meta name="twitter:image" content="${escape(imageUrl)}">` : "";
-  return `<!doctype html><html lang="fa" dir="rtl"><head><meta charset="utf-8"><meta name="viewport" content="width=device-width,initial-scale=1"><meta name="theme-color" content="#123f38"><meta name="description" content="کتابخانه خواندن و شنیدن فارسی با ترجمه جمله‌ای و تمرین شنیداری">${social}<title>${escape(title)}</title><style>${css}${handbookCss}</style></head><body>${globalControls}${content}<script>${commonScript}</script>${scripts}</body></html>`;
+  return `<!doctype html><html lang="fa" dir="rtl"><head><meta charset="utf-8"><meta name="viewport" content="width=device-width,initial-scale=1"><meta name="theme-color" content="#123f38"><meta name="description" content="کتابخانه خواندن و شنیدن فارسی با ترجمه جمله‌ای و تمرین شنیداری">${social}<title>${escape(title)}</title><style>${css}${handbookCss}</style></head><body>${globalControls}${content}<script>${commonScript}</script><script type="module">${piperClientScript}</script>${scripts}</body></html>`;
 };
 
 function siteHeader(active = "library") {
@@ -552,7 +563,7 @@ function readerPage(reader, week, teacher, origin) {
   const notes = teacher && week.vocab.length ? `<section class="teacher-notes" dir="ltr"><h2>Vocabulary and usage</h2><ul>${week.vocab.map((word) => `<li>${escape(word)}</li>`).join("")}</ul>${week.note ? `<p><strong>Teaching note:</strong> ${escape(week.note)}</p>` : ""}</section>` : "";
   const picker = `<label>بخش <select aria-label="انتخاب بخش" onchange="window.location.href='/read/${reader.slug}/'+this.value+'${teacher ? "?edition=teacher" : ""}'">${reader.weeks.map((item) => `<option value="${item.number}"${item.number === week.number ? " selected" : ""}>${faNumber(item.number)} از ${faNumber(reader.weeks.length)}</option>`).join("")}</select></label>`;
   const downloads = reader.student && reader.teacher ? `<section class="reader-downloads"><p>دریافت نسخه کامل</p><a href="/downloads/${reader.student}">فایل دانشجو</a><a href="/downloads/${reader.teacher}">فایل مدرس</a></section>` : "";
-  const tools = `<section class="reader-tools" aria-label="ابزارهای خواندن"><button class="tool-button" type="button" data-listening-toggle aria-pressed="false">حالت شنیداری</button><button class="tool-button" type="button" data-play-toggle aria-pressed="false">پخش</button><button class="tool-button" type="button" data-next-sentence>جمله بعد</button><button class="tool-button" type="button" data-piper-button>فعال‌سازی Piper (حدود ۹۰ مگابایت)</button><span class="voice-badge" data-voice-badge>صدای مرورگر</span><span class="voice-status" data-voice-status aria-live="polite">صدای سریع مرورگر آماده است؛ Piper اختیاری است.</span></section>`;
+  const tools = `<section class="reader-tools" aria-label="ابزارهای خواندن"><button class="tool-button" type="button" data-listening-toggle aria-pressed="false">حالت شنیداری</button><button class="tool-button" type="button" data-play-toggle aria-pressed="false">پخش</button><button class="tool-button" type="button" data-next-sentence>جمله بعد</button><span class="voice-badge" data-voice-badge>Piper در حال آماده‌سازی</span><span class="voice-status" data-voice-status aria-live="polite">Piper به‌طور خودکار در حال آماده‌سازی است.</span></section>`;
   return page(`${reader.title_fa} — بخش ${faNumber(week.number)}`, `<main class="reader-page"><header class="reader-header"><a class="back-link" href="/">← کتابخانه</a><div class="reader-title-block"><p>${reader.category}</p><h1>${reader.title_fa}</h1>${teacher ? `<span class="english-title" dir="ltr">${escape(reader.title_en)}</span>` : ""}</div><span class="week-chip">بخش ${faNumber(week.number)}</span></header><nav class="edition-switch" aria-label="انتخاب نسخه"><a class="${teacher ? "" : "active"}" href="/read/${reader.slug}/${week.number}">مطالعه</a><a class="${teacher ? "active" : ""}" href="/read/${reader.slug}/${week.number}?edition=teacher">راهنمای مدرس</a></nav>${tools}<article class="week-reader"><div class="week-intro"><p>${week.section_fa}</p><span>${faNumber(week.lines.length)} جمله</span></div><ol class="source-lines">${lines}</ol>${notes}</article><nav class="week-navigation">${previous}${picker}${next}</nav>${downloads}</main>`, `<script type="module">${readerScript}</script>`, origin);
 }
 
