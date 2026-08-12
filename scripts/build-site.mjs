@@ -10,9 +10,11 @@ for (const name of await readdir(downloadDir)) {
   files[name] = (await readFile(path.join(downloadDir, name))).toString("base64");
 }
 const template = await readFile(path.join(root, "worker", "template.js"), "utf8");
+const ogImage = (await readFile(path.join(root, "public", "og.png"))).toString("base64");
 const bundled = template
   .replace("__READERS__", JSON.stringify(readers.readers))
-  .replace("__FILES__", JSON.stringify(files));
+  .replace("__FILES__", JSON.stringify(files))
+  .replace("__OG_IMAGE__", JSON.stringify(ogImage));
 const dist = path.join(root, "dist");
 await mkdir(path.join(dist, "server"), { recursive: true });
 await mkdir(path.join(dist, ".openai"), { recursive: true });
