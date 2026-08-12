@@ -16,39 +16,39 @@ const ADVANCED_SOURCES = [
     task: "یک غزل را بلند بخوانید و واژه‌های کهن را جدا کنید.",
   },
   {
-    kind: "دانشنامه",
-    title: "مرکز دائرةالمعارف بزرگ اسلامی",
-    description: "مقاله‌های بلند و ویراسته درباره تاریخ، فرهنگ، زبان، هنر و جامعه ایران.",
-    url: "https://www.cgie.org.ir/",
-    task: "یک مدخل را خلاصه کنید و ساختار استدلال آن را پیدا کنید.",
+    kind: "متن‌های آزاد",
+    title: "ویکی‌نبشتهٔ فارسی",
+    description: "کتابخانه‌ای بزرگ از کتاب‌ها، اسناد و آثار فارسیِ آزاد؛ مناسب برای مطالعهٔ متن‌های کامل.",
+    url: "https://fa.wikisource.org/wiki/ویکی‌نبشته:آثار",
+    task: "یک اثر کامل را انتخاب کنید و تفاوت زبان فصل‌های آن را یادداشت کنید.",
   },
   {
-    kind: "پژوهش دانشگاهی",
-    title: "پایگاه اطلاعات علمی SID",
-    description: "مقاله‌ها و چکیده‌های دانشگاهی فارسی در علوم انسانی، اجتماعی و فنی.",
-    url: "https://www.sid.ir/",
-    task: "چکیده یک مقاله را بخوانید و پنج اصطلاح تخصصی بردارید.",
+    kind: "تحلیل و دیدگاه",
+    title: "رادیو زمانه",
+    description: "گزارش‌ها، جستارها و تحلیل‌های بلند دربارهٔ جامعه، فرهنگ، اندیشه و سیاست.",
+    url: "https://www.radiozamaneh.com/section/opinion/",
+    task: "یک تحلیل بلند را بخوانید و ادعا، شواهد و نتیجهٔ آن را جدا کنید.",
   },
   {
-    kind: "نشریات",
-    title: "نورمگز",
-    description: "آرشیو بزرگ مجله‌ها و مقاله‌های فارسی در علوم انسانی و مطالعات فرهنگی.",
-    url: "https://www.noormags.ir/",
-    task: "دو چکیده درباره یک موضوع را از نظر لحن مقایسه کنید.",
+    kind: "خبر و تحلیل بین‌المللی",
+    title: "دویچه‌وله فارسی",
+    description: "مجموعه‌ای گسترده از خبر، تحلیل، فرهنگ، دانش و محتوای دیداری‌ـ‌شنیداری به فارسی معاصر.",
+    url: "https://www.dw.com/fa-ir/",
+    task: "یک گزارش را بخوانید و ترکیب‌های رسمی و فعل‌های خبری آن را استخراج کنید.",
   },
   {
-    kind: "خبر و گزارش",
-    title: "ایسنا",
-    description: "گزارش‌های روز در حوزه‌های علمی، فرهنگی، اجتماعی، اقتصادی و ورزشی.",
-    url: "https://www.isna.ir/",
-    task: "یک خبر و یک گزارش تحلیلی را از نظر زبان مقایسه کنید.",
+    kind: "خبر چندرسانه‌ای",
+    title: "یورونیوز فارسی",
+    description: "خبرها و گزارش‌های بین‌المللی در موضوع‌های سیاسی، علمی، فرهنگی و اجتماعی با نثر روزآمد.",
+    url: "https://parsi.euronews.com/",
+    task: "یک موضوع را در نسخهٔ متنی و ویدیویی دنبال و تفاوت واژگان را ثبت کنید.",
   },
   {
-    kind: "زبان رسمی",
-    title: "ایرنا",
-    description: "نمونه گسترده‌ای از نثر رسمی خبری و گزارش‌های استانی و ملی.",
-    url: "https://www.irna.ir/",
-    task: "عنوان خبر را با بند نخست مقایسه و فعل‌های رسمی را مشخص کنید.",
+    kind: "گزارش و راستی‌آزمایی",
+    title: "ایران‌وایر فارسی",
+    description: "آرشیوی گسترده از گزارش، روایت، مصاحبه و راستی‌آزمایی با سبک‌های گوناگون نثر معاصر.",
+    url: "https://iranwire.com/fa/",
+    task: "یک گزارش و یک راستی‌آزمایی را از نظر ساختار و میزان قطعیت مقایسه کنید.",
   },
   {
     kind: "خواندن و شنیدن",
@@ -551,7 +551,7 @@ function home(origin) {
   const groups = categories.map((category) => ({ category, readers: READERS.filter((reader) => reader.category === category) }));
   const weeklyCount = READERS.reduce((total, reader) => total + reader.weeks.length, 0);
   const cards = groups.map(({ category, readers }) => `<section class="collection" id="${encodeURIComponent(category)}"><div class="collection-heading"><p>${category}</p><span>${faNumber(readers.length)} عنوان</span></div><div class="reader-grid">${readers.map((reader) => `<article class="reader-card"><div class="reader-card-top"><p>${reader.category}</p><span>${faNumber(reader.weeks.length)} بخش</span></div><h2>${reader.title_fa}</h2><div class="card-actions"><a class="read-button" href="/read/${reader.slug}/1">شروع خواندن</a>${reader.student && reader.teacher ? `<div class="downloads"><a href="/downloads/${reader.student}">دانشجو</a><a href="/downloads/${reader.teacher}">مدرس</a></div>` : `<span class="downloads">نسخه برخط</span>`}</div></article>`).join("")}</div></section>`).join("");
-  return page("خوانش فارسی", `<main>${siteHeader()}<section class="hero"><p class="eyebrow">کتابخانه خواندن و شنیدن</p><h1>فارسی را بخوان، بشنو، و کشف کن.</h1><p class="hero-copy">متن‌های ادبی و علمی، جمله‌به‌جمله؛ با ترجمه انتخابی، صدای فارسی و حالت تمرین شنیداری.</p><div class="stats"><span>${faNumber(READERS.length)} عنوان</span><span>${faNumber(weeklyCount)} بخش</span><span>دانشجو و مدرس</span></div></section><section class="quick-strip" aria-label="امکانات خوانش"><div class="quick-item"><span class="quick-icon">۱</span><p>ترجمه هر جمله، فقط وقتی لازم است</p></div><div class="quick-item"><span class="quick-icon">◖</span><p>صدای فارسی با مکث و ادامه</p></div><div class="quick-item"><span class="quick-icon">◌</span><p>حالت شنیداری با متن پوشیده</p></div></section><section class="feature-panel"><div class="feature-card"><div class="feature-copy"><small>تازه در کتابخانه</small><h2>راهنمای مطالعهٔ AFH 1</h2><p>نسخه فارسی دانشجو و نسخه دوزبانه مدرس، با شماره‌گذاری یکسان جمله‌ها.</p></div><div class="feature-actions"><a class="button" href="/read/afh1-2025/1">مطالعه در سایت</a><a class="button secondary" href="/downloads/${HANDBOOKS.student}">دریافت نسخه دانشجو</a><a class="button secondary" href="/downloads/${HANDBOOKS.teacher}">دریافت نسخه مدرس</a></div></div></section><div class="collections">${cards}</div>${siteFooter()}</main>`, "", origin);
+  return page("خوانش فارسی", `<main>${siteHeader()}<section class="hero"><p class="eyebrow">کتابخانهٔ خواندن و شنیدن</p><h1>فارسی را بخوان، بشنو و کشف کن.</h1><p class="hero-copy">متن‌های ادبی و علمی، جمله‌به‌جمله؛ با ترجمهٔ انتخابی، صدای فارسی و تمرین شنیداری.</p><div class="stats"><span>${faNumber(READERS.length)} عنوان</span><span>${faNumber(weeklyCount)} بخش</span><span>دانشجو و مدرس</span></div></section><section class="quick-strip" aria-label="امکانات خوانش"><div class="quick-item"><span class="quick-icon">۱</span><p>ترجمهٔ هر جمله، فقط وقتی لازم است</p></div><div class="quick-item"><span class="quick-icon">◖</span><p>صدای فارسی با مکث و ادامه</p></div><div class="quick-item"><span class="quick-icon">◌</span><p>تمرین شنیداری با متن پوشیده</p></div></section><section class="feature-panel"><div class="feature-card"><div class="feature-copy"><small>تازه در کتابخانه</small><h2>راهنمای مطالعهٔ AFH 1</h2><p>نسخهٔ فارسی دانشجو و نسخهٔ دوزبانهٔ مدرس، با شماره‌گذاری یکسان جمله‌ها.</p></div><div class="feature-actions"><a class="button" href="/read/afh1-2025/1">مطالعه در سایت</a><a class="button secondary" href="/downloads/${HANDBOOKS.student}">دریافت نسخهٔ دانشجو</a><a class="button secondary" href="/downloads/${HANDBOOKS.teacher}">دریافت نسخهٔ مدرس</a></div></div></section><div class="collections">${cards}</div>${siteFooter()}</main>`, "", origin);
 }
 
 function readerPage(reader, week, teacher, origin) {
@@ -569,7 +569,7 @@ function readerPage(reader, week, teacher, origin) {
 
 function resourcesPage(origin) {
   const sources = ADVANCED_SOURCES.map((source) => `<article class="source-card"><small>${source.kind}</small><h3>${source.title}</h3><p>${source.description}</p><p class="practice-task"><strong>تمرین:</strong> ${source.task}</p><a ${externalLink(source.url)}>رفتن به منبع ↗</a></article>`).join("");
-  return page("منابع پیشرفته فارسی", `<main>${siteHeader("resources")}<div class="resources-page"><section class="resources-hero"><a class="back-link" href="/">← کتابخانه</a><h1>منابع اصیل برای فارسی پیشرفته</h1><p>متن‌های واقعی و بلند برای گسترش واژگان، آشنایی با سبک‌های گوناگون و مطالعه مستقل.</p></section><section class="resource-section"><div class="resource-section-heading"><small>شاهنامه به زبان امروز</small><h2>نسخه‌های کامل و روایی</h2></div><div class="prose-grid"><article class="prose-card"><small>متن کامل منظوم</small><h3>شاهنامه فردوسی در گنجور</h3><p>نزدیک به پنجاه هزار بیت در یک مجموعه جست‌وجوپذیر؛ مناسب برای رجوع به متن اصلی.</p><a class="button ghost" ${externalLink("https://ganjoor.net/ferdousi/shahname/")}>دیدن متن کامل</a></article><article class="prose-card"><small>نثر روان و کامل</small><h3>نثر کامل شاهنامه فردوسی</h3><p>روایت عباس عطاری کرمانی با زبان ساده و پیوسته؛ گزینه‌ای برای خواندن شاهنامه مانند یک داستان بلند.</p><a class="button ghost" ${externalLink("https://taaghche.com/book/91793/%D9%86%D8%AB%D8%B1-%DA%A9%D8%A7%D9%85%D9%84-%D8%B4%D8%A7%D9%87%D9%86%D8%A7%D9%85%D9%87-%D9%81%D8%B1%D8%AF%D9%88%D8%B3%DB%8C")}>مشاهده نسخه قانونی</a></article><article class="prose-card"><small>روایت داستانی کامل</small><h3>شاهنامه به نثر کاوه گوهرین</h3><p>بازگویی کامل داستان‌ها از آغاز تا پایان، برای خواننده‌ای که نثر معاصر را ترجیح می‌دهد.</p><a class="button ghost" ${externalLink("https://zhin.co.uk/shop/shahnameh-3/")}>مشاهده معرفی کتاب</a></article></div></section><section class="resource-section"><div class="resource-section-heading"><small>راهنمای دوره</small><h2>دفترچه AFH 1</h2></div><div class="handbook-downloads"><a class="button" href="/downloads/${HANDBOOKS.student}">نسخه فارسی دانشجو</a><a class="button secondary" href="/downloads/${HANDBOOKS.teacher}">نسخه دوزبانه مدرس</a></div></section><section class="resource-section"><div class="resource-section-heading"><small>مطالعه تکمیلی</small><h2>نشریات و پایگاه‌های بزرگ</h2></div><div class="source-grid">${sources}</div></section></div>${siteFooter()}</main>`, "", origin);
+  return page("منابع پیشرفتهٔ فارسی", `<main>${siteHeader("resources")}<div class="resources-page"><section class="resources-hero"><a class="back-link" href="/">← کتابخانه</a><h1>منابع معتبر برای فارسی پیشرفته</h1><p>متن‌های واقعی و بلند برای گسترش واژگان، آشنایی با سبک‌های گوناگون و مطالعهٔ مستقل.</p></section><section class="resource-section"><div class="resource-section-heading"><small>شاهنامه به زبان امروز</small><h2>نسخه‌های کامل و روایی</h2></div><div class="prose-grid"><article class="prose-card"><small>متن کامل منظوم</small><h3>شاهنامهٔ فردوسی در گنجور</h3><p>نزدیک به پنجاه هزار بیت در مجموعه‌ای جست‌وجوپذیر؛ مناسب برای رجوع به متن اصلی.</p><a class="button ghost" ${externalLink("https://ganjoor.net/ferdousi/shahname/")}>دیدن متن کامل</a></article><article class="prose-card"><small>نثر روان و کامل</small><h3>نثر کامل شاهنامهٔ فردوسی</h3><p>روایت عباس عطاری کرمانی با زبان ساده و پیوسته؛ مناسب برای خواندن شاهنامه مانند داستانی بلند.</p><a class="button ghost" ${externalLink("https://taaghche.com/book/91793/%D9%86%D8%AB%D8%B1-%DA%A9%D8%A7%D9%85%D9%84-%D8%B4%D8%A7%D9%87%D9%86%D8%A7%D9%85%D9%87-%D9%81%D8%B1%D8%AF%D9%88%D8%B3%DB%8C")}>مشاهدهٔ نسخهٔ قانونی</a></article><article class="prose-card"><small>روایت داستانی کامل</small><h3>شاهنامه به نثر کاوه گوهرین</h3><p>بازگویی کامل داستان‌ها از آغاز تا پایان برای خواننده‌ای که نثر معاصر را ترجیح می‌دهد.</p><a class="button ghost" ${externalLink("https://zhin.co.uk/shop/shahnameh-3/")}>مشاهدهٔ معرفی کتاب</a></article></div></section><section class="resource-section"><div class="resource-section-heading"><small>راهنمای دوره</small><h2>راهنمای AFH 1</h2></div><div class="handbook-downloads"><a class="button" href="/downloads/${HANDBOOKS.student}">نسخهٔ فارسی دانشجو</a><a class="button secondary" href="/downloads/${HANDBOOKS.teacher}">نسخهٔ دوزبانهٔ مدرس</a></div></section><section class="resource-section"><div class="resource-section-heading"><small>مطالعهٔ تکمیلی</small><h2>نشریات و پایگاه‌های بزرگ</h2></div><div class="source-grid">${sources}</div></section></div>${siteFooter()}</main>`, "", origin);
 }
 
 function download(name) {
