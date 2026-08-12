@@ -315,7 +315,7 @@ function setCurrent(row) {
 function highlightIndex(row, index) {
   const words = Array.from(row?.querySelectorAll('.spoken-word') || []);
   words.forEach(function (word, wordIndex) {
-    word.classList.toggle('is-read', wordIndex < index);
+    word.classList.remove('is-read');
     word.classList.toggle('is-current', wordIndex === index);
   });
 }
@@ -359,7 +359,7 @@ function stopPlayback(keepHighlight) {
 }
 
 function finishPlayback() {
-  if (currentRow) highlightRatio(currentRow, 1);
+  clearWords(currentRow);
   playback = null;
   nativeUtterance = null;
   cancelAnimationFrame(animationFrame);
