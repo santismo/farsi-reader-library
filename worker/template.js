@@ -156,9 +156,6 @@ piperWarmup.warm = function () {
   return piperWarmup.promise;
 };
 
-const beginPiperWarmup = function () { piperWarmup.warm().catch(function () {}); };
-if ('requestIdleCallback' in window) requestIdleCallback(beginPiperWarmup, { timeout: 600 });
-else setTimeout(beginPiperWarmup, 100);
 `;
 
 const readerScript = String.raw`
@@ -166,11 +163,14 @@ const rows = Array.from(document.querySelectorAll('.sentence-row:not(.is-heading
 const playToggle = document.querySelector('[data-play-toggle]');
 const nextButton = document.querySelector('[data-next-sentence]');
 const listeningToggle = document.querySelector('[data-listening-toggle]');
+const piperButton = document.querySelector('[data-piper-button]');
+const voiceBadge = document.querySelector('[data-voice-badge]');
 const statusNode = document.querySelector('[data-voice-status]');
 let currentRow = null;
 let audioContext = null;
 let playback = null;
 let nativeUtterance = null;
+let voiceMode = 'browser';
 let animationFrame = 0;
 let requestToken = 0;
 
@@ -330,10 +330,14 @@ async function readRow(row) {
   stopPlayback(false);
   const token = requestToken;
   setCurrent(row);
+  if (voiceMode !== 'piper') {
+    speakWithBrowser(row, token, 'صدای سریع مرورگر در حال پخش است.');
+    return;
+  }
   await ensureAudio().catch(function () {});
-  setStatus(window.farsiPiper?.message || 'در حال آماده‌سازی صدای Piper…');
+  setStatus('در حال ساخت صدا با Piper…');
   try {
-    const piper = await ensurePiper(8000);
+    const piper = await ensurePiper(1500);
     setStatus('در حال ساخت صدا…');
     const wav = await piper.predict({ text: row.dataset.text || '', voiceId: 'fa_IR-amir-medium' }, function (progress) {
       if (token === requestToken && String(progress?.url || '').startsWith('tts://')) setStatus('در حال ساخت صدا…');
@@ -352,6 +356,50 @@ async function readRow(row) {
       : 'Piper در دسترس نیست؛ صدای مرورگر پخش می‌شود.';
     speakWithBrowser(row, token, message);
   }
+}
+
+function activatePiper() {
+  const warmup = window.farsiPiper;
+  if (!warmup?.warm) {
+    setStatus('Piper در این مرورگر در دسترس نیست؛ صدای مرورگر فعال است.');
+    return;
+  }
+  if (warmup.state === 'ready') {
+    voiceMode = 'piper';
+    if (voiceBadge) voiceBadge.textContent = 'Piper · امیر';
+    if (piperButton) {
+      piperButton.textContent = 'Piper فعال است';
+      piperButton.disabled = true;
+    }
+    setStatus('صدای Piper آماده است.');
+    return;
+  }
+  if (piperButton) {
+    piperButton.textContent = 'در حال دریافت Piper…';
+    piperButton.disabled = true;
+  }
+  setStatus('در حال دریافت صدای Piper؛ در این فاصله صدای مرورگر فعال است.');
+  const slowNotice = setTimeout(function () {
+    if (warmup.state === 'ready' || warmup.state === 'error') return;
+    setStatus('دریافت Piper هنوز ادامه دارد؛ پخش جمله‌ها با صدای مرورگر آماده است.');
+    if (piperButton) {
+      piperButton.textContent = 'بررسی دوبارهٔ Piper';
+      piperButton.disabled = false;
+    }
+  }, 12000);
+  warmup.warm().then(function () {
+    clearTimeout(slowNotice);
+    activatePiper();
+  }).catch(function () {
+    clearTimeout(slowNotice);
+    voiceMode = 'browser';
+    if (voiceBadge) voiceBadge.textContent = 'صدای مرورگر';
+    if (piperButton) {
+      piperButton.textContent = 'تلاش دوباره برای Piper';
+      piperButton.disabled = false;
+    }
+    setStatus('دریافت Piper کامل نشد؛ صدای مرورگر فعال است.');
+  });
 }
 
 function pauseOrResume() {
@@ -411,6 +459,7 @@ listeningToggle?.addEventListener('click', function () {
 });
 
 playToggle?.addEventListener('click', pauseOrResume);
+piperButton?.addEventListener('click', activatePiper);
 nextButton?.addEventListener('click', function () {
   const currentIndex = Math.max(0, rows.indexOf(currentRow));
   const nextRow = rows[Math.min(rows.length - 1, currentIndex + 1)];
@@ -423,7 +472,7 @@ const globalControls = `<div class="global-controls" aria-label="تنظیمات 
 const page = (title, content, scripts = "", origin = "") => {
   const imageUrl = origin ? `${origin}/og.png` : "";
   const social = imageUrl ? `<meta property="og:type" content="website"><meta property="og:title" content="${escape(title)}"><meta property="og:description" content="کتابخانه خواندن و شنیدن فارسی"><meta property="og:image" content="${escape(imageUrl)}"><meta name="twitter:card" content="summary_large_image"><meta name="twitter:title" content="${escape(title)}"><meta name="twitter:description" content="کتابخانه خواندن و شنیدن فارسی"><meta name="twitter:image" content="${escape(imageUrl)}">` : "";
-  return `<!doctype html><html lang="fa" dir="rtl"><head><meta charset="utf-8"><meta name="viewport" content="width=device-width,initial-scale=1"><meta name="theme-color" content="#123f38"><meta name="description" content="کتابخانه خواندن و شنیدن فارسی با ترجمه جمله‌ای و تمرین شنیداری"><link rel="modulepreload" crossorigin href="https://esm.sh/@mintplex-labs/piper-tts-web@1.0.5?bundle&deps=onnxruntime-web@1.18.0">${social}<title>${escape(title)}</title><style>${css}${handbookCss}</style></head><body>${globalControls}${content}<script>${commonScript}</script><script type="module">${piperWarmScript}</script>${scripts}</body></html>`;
+  return `<!doctype html><html lang="fa" dir="rtl"><head><meta charset="utf-8"><meta name="viewport" content="width=device-width,initial-scale=1"><meta name="theme-color" content="#123f38"><meta name="description" content="کتابخانه خواندن و شنیدن فارسی با ترجمه جمله‌ای و تمرین شنیداری">${social}<title>${escape(title)}</title><style>${css}${handbookCss}</style></head><body>${globalControls}${content}<script>${commonScript}</script><script type="module">${piperWarmScript}</script>${scripts}</body></html>`;
 };
 
 function siteHeader(active = "library") {
@@ -452,7 +501,7 @@ function readerPage(reader, week, teacher, origin) {
   const notes = teacher && week.vocab.length ? `<section class="teacher-notes" dir="ltr"><h2>Vocabulary and usage</h2><ul>${week.vocab.map((word) => `<li>${escape(word)}</li>`).join("")}</ul>${week.note ? `<p><strong>Teaching note:</strong> ${escape(week.note)}</p>` : ""}</section>` : "";
   const picker = `<label>بخش <select aria-label="انتخاب بخش" onchange="window.location.href='/read/${reader.slug}/'+this.value+'${teacher ? "?edition=teacher" : ""}'">${reader.weeks.map((item) => `<option value="${item.number}"${item.number === week.number ? " selected" : ""}>${faNumber(item.number)} از ${faNumber(reader.weeks.length)}</option>`).join("")}</select></label>`;
   const downloads = reader.student && reader.teacher ? `<section class="reader-downloads"><p>دریافت نسخه کامل</p><a href="/downloads/${reader.student}">فایل دانشجو</a><a href="/downloads/${reader.teacher}">فایل مدرس</a></section>` : "";
-  const tools = `<section class="reader-tools" aria-label="ابزارهای خواندن"><button class="tool-button" type="button" data-listening-toggle aria-pressed="false">حالت شنیداری</button><button class="tool-button" type="button" data-play-toggle aria-pressed="false">پخش</button><button class="tool-button" type="button" data-next-sentence>جمله بعد</button><span class="voice-badge">Piper · امیر</span><span class="voice-status" data-voice-status aria-live="polite">بار نخست، آماده‌سازی صدا ممکن است کمی طول بکشد.</span></section>`;
+  const tools = `<section class="reader-tools" aria-label="ابزارهای خواندن"><button class="tool-button" type="button" data-listening-toggle aria-pressed="false">حالت شنیداری</button><button class="tool-button" type="button" data-play-toggle aria-pressed="false">پخش</button><button class="tool-button" type="button" data-next-sentence>جمله بعد</button><button class="tool-button" type="button" data-piper-button>صدای Piper (۶۴ مگابایت)</button><span class="voice-badge" data-voice-badge>صدای مرورگر</span><span class="voice-status" data-voice-status aria-live="polite">صدای سریع مرورگر آماده است؛ Piper اختیاری است.</span></section>`;
   return page(`${reader.title_fa} — بخش ${faNumber(week.number)}`, `<main class="reader-page"><header class="reader-header"><a class="back-link" href="/">← کتابخانه</a><div class="reader-title-block"><p>${reader.category}</p><h1>${reader.title_fa}</h1>${teacher ? `<span class="english-title" dir="ltr">${escape(reader.title_en)}</span>` : ""}</div><span class="week-chip">بخش ${faNumber(week.number)}</span></header><nav class="edition-switch" aria-label="انتخاب نسخه"><a class="${teacher ? "" : "active"}" href="/read/${reader.slug}/${week.number}">مطالعه</a><a class="${teacher ? "active" : ""}" href="/read/${reader.slug}/${week.number}?edition=teacher">راهنمای مدرس</a></nav>${tools}<article class="week-reader"><div class="week-intro"><p>${week.section_fa}</p><span>${faNumber(week.lines.length)} جمله</span></div><ol class="source-lines">${lines}</ol>${notes}</article><nav class="week-navigation">${previous}${picker}${next}</nav>${downloads}</main>`, `<script type="module">${readerScript}</script>`, origin);
 }
 
