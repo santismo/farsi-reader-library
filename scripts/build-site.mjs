@@ -7,6 +7,9 @@ const readers = JSON.parse(await readFile(path.join(root, "data/readers.json"), 
 const downloadDir = path.join(root, "public", "downloads");
 const files = {};
 for (const name of await readdir(downloadDir)) {
+  // Large fixed-layout PDFs live in the GitHub mirror; the Sites Worker redirects
+  // to those identical files instead of embedding them in its limited bundle.
+  if (name.endsWith(".pdf")) continue;
   files[name] = (await readFile(path.join(downloadDir, name))).toString("base64");
 }
 const template = await readFile(path.join(root, "worker", "template.js"), "utf8");

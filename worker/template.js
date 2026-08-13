@@ -10,6 +10,7 @@ const HANDBOOKS = {
 };
 
 const GITHUB_REPOSITORY = "https://github.com/santismo/farsi-reader-library";
+const GITHUB_PAGES_DOWNLOADS = "https://santismo.github.io/farsi-reader-library/downloads";
 const DOWNLOAD_BUNDLE = `${GITHUB_REPOSITORY}/archive/refs/heads/main.zip`;
 
 const ADVANCED_SOURCES = [
@@ -619,6 +620,9 @@ function downloadsPage(origin) {
 
 function download(name) {
   const data = FILES[name];
+  if (!data && [HANDBOOKS.studentPdf, HANDBOOKS.teacherPdf].includes(name)) {
+    return Response.redirect(`${GITHUB_PAGES_DOWNLOADS}/${name}`, 302);
+  }
   if (!data) return new Response("Not found", { status: 404 });
   const binary = atob(data);
   const bytes = new Uint8Array(binary.length);

@@ -22,4 +22,17 @@ assert.equal(
   `${pathToFileURL(workerPath)} must export default.fetch`,
 );
 
-console.log("Artifact is valid ESM and exports default.fetch");
+for (const pdf of [
+  "AFH1_2025_Farsi_Student_Study_Handbook.pdf",
+  "AFH1_2025_Farsi_English_Teacher_Handbook.pdf",
+]) {
+  const response = await workerModule.default.fetch(new Request(`https://example.com/downloads/${pdf}`, { redirect: "manual" }));
+  assert.equal(response.status, 302, `${pdf} must redirect to the GitHub Pages download.`);
+  assert.equal(
+    response.headers.get("location"),
+    `https://santismo.github.io/farsi-reader-library/downloads/${pdf}`,
+    `${pdf} must redirect to its matching fixed-layout file.`,
+  );
+}
+
+console.log("Artifact is valid ESM, exports default.fetch, and preserves AFH PDF downloads.");
