@@ -60,6 +60,16 @@ for (const reader of readers) {
   }
 }
 
+for (const pdf of [
+  "AFH1_2025_Farsi_Student_Study_Handbook.pdf",
+  "AFH1_2025_Farsi_English_Teacher_Handbook.pdf",
+]) {
+  const header = await readFile(path.join(output, "downloads", pdf), { encoding: null });
+  if (header.subarray(0, 5).toString("ascii") !== "%PDF-") {
+    throw new Error(`Invalid PDF download: ${pdf}`);
+  }
+}
+
 for (const file of htmlFiles) {
   const html = await readFile(file, "utf8");
   if (html.includes("?edition=teacher")) throw new Error(`Dynamic teacher link remains in ${path.relative(output, file)}.`);

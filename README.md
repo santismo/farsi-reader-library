@@ -1,13 +1,12 @@
 # Farsi Reader Library · کتابخانهٔ خوانش فارسی
 
-The complete source and document collection behind [farsi.ojertrejo.chatgpt.site](https://farsi.ojertrejo.chatgpt.site). The library contains 17 Persian readers with sentence-level English support, student and teacher modes, listening practice, and full Word downloads. A complete static mirror is also published with [GitHub Pages](https://santismo.github.io/farsi-reader-library/).
+The complete source and document collection behind [farsi.ojertrejo.chatgpt.site](https://farsi.ojertrejo.chatgpt.site). The library contains 17 Persian readers with sentence-level English support, student and teacher modes, listening practice, full Word downloads, and fixed-layout PDF editions of the AFH 1 handbooks.
 
 ## Download the materials
 
-- [Browse every Student and Teacher DOCX](DOWNLOADS.md)
+- [Browse every Student and Teacher download](DOWNLOADS.md)
 - [Download the complete repository as a ZIP](https://github.com/santismo/farsi-reader-library/archive/refs/heads/main.zip)
-- [Read and listen on GitHub Pages](https://santismo.github.io/farsi-reader-library/)
-- [Read and listen on the ChatGPT-hosted site](https://farsi.ojertrejo.chatgpt.site)
+- [Read and listen on the live site](https://farsi.ojertrejo.chatgpt.site)
 
 ## Collection
 
@@ -21,17 +20,14 @@ The collection currently includes 1,516 sections and 25,838 Persian reading line
 
 ## Repository layout
 
-- `public/downloads/`: all complete student and teacher DOCX files
+- `public/downloads/`: all complete student and teacher DOCX files, plus fixed-layout AFH 1 PDFs
 - `data/readers.json`: the full structured bilingual reader corpus used by the site
 - `worker/template.js`: the site interface, reader mode, downloads catalog, and audio controls
 - `scripts/`: corpus normalization, handbook synchronization, document generation, validation, and deployment build tools
-- `.github/workflows/pages.yml`: automatic GitHub Pages publication from `main`
 
 ## Build
 
 This is a dependency-free Sites Worker project. Run `npm run build` to create the deployable worker in `dist/`, then run `node scripts/validate-artifact.mjs` to verify the artifact.
-
-Run `npm run build:pages` to create the complete static GitHub Pages mirror in `pages-dist/`, followed by `npm run validate:pages` to audit its routes and downloads. GitHub Actions runs both commands and publishes the result after every push to `main`.
 
 ## Notes
 
