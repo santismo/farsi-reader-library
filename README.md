@@ -1,6 +1,6 @@
 # Farsi Reader Library · کتابخانهٔ خوانش فارسی
 
-The complete source and document collection behind [farsi.ojertrejo.chatgpt.site](https://farsi.ojertrejo.chatgpt.site). The library contains 17 Persian readers with sentence-level English support, student and teacher modes, listening practice, full Word downloads, and fixed-layout PDF editions of the AFH 1 handbooks.
+The complete source and document collection. The library contains 17 Persian readers with sentence-level English support, student and teacher modes, listening practice, full Word downloads, and fixed-layout PDF editions of the AFH 1 handbooks.
 
 ## Download the materials
 
